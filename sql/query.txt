@@ -1,0 +1,152 @@
+CREATE PROCEDURE dbo.p_CheckFailedJobsForToday_Monitor
+AS
+
+
+
+
+
+CREATE PROCEDURE dbo.p_CheckFailedJobsForToday_Monitor
+AS
+TRUNCATE TABLE Kr1sSqlJobMonitor_REPORT;
+WITH    cte
+AS ( SELECT   job_id ,
+CONVERT(DATETIME, CONVERT(VARCHAR, DATEADD(S,
+( run_time
+/ 10000 ) * 60
+* 60 /* hours */
++ ( ( run_time
+- ( run_time
+/ 10000 )
+* 10000 ) / 100 )
+* 60 /* mins */
++ ( run_time
+- ( run_time
+/ 100 ) * 100 )/* secs */,
+CONVERT(DATETIME, RTRIM(run_date), 113)), 100)) DateRun ,
+ROW_NUMBER() OVER ( PARTITION BY job_id ORDER BY CONVERT(DATETIME, CONVERT(VARCHAR, DATEADD(S,
+( run_time
+/ 10000 ) * 60
+* 60 /* hours */
++ ( ( run_time
+- ( run_time
+/ 10000 )
+* 10000 ) / 100 )
+* 60 /* mins */
++ ( run_time
+- ( run_time
+/ 100 ) * 100 )/* secs */,
+CONVERT(DATETIME, RTRIM(run_date), 113)), 100)) DESC ) rn
+FROM     msdb..sysjobhistory
+)
+INSERT  INTO Kr1sSqlJobMonitor_REPORT
+SELECT  s1.name ,
+GETDATE() LogDate ,
+s.DateRun ,
+s.message--, s.message, 'exec msdb..sp_start_job ''' + s1.name + '''' [SQLToRun]
+FROM    ( SELECT    job_id ,
+DateRun
+FROM      cte
+WHERE     rn = 1
+) max_
+INNER JOIN ( SELECT CONVERT(DATETIME, CONVERT(VARCHAR, DATEADD(s,
+( run_time
+/ 10000 ) * 60
+* 60 /* hours */
++ ( ( run_time
+- ( run_time
+/ 10000 )
+* 10000 ) / 100 )
+* 60 /* mins */
++ ( run_time
+- ( run_time
+/ 100 ) * 100 )/* secs */,
+CONVERT(DATETIME, RTRIM(run_date), 113)), 100)) DateRun ,
+*
+FROM   msdb..sysjobhistory
+WHERE  message NOT LIKE '%KOMMS.%'
+AND message NOT LIKE '%*FILE not found%'
+AND message NOT LIKE '%PJX_%'-- i.e. failed
+AND run_status = 0
+AND step_name <> '(Job outcome)'
+) s ON s.job_id = max_.job_id
+AND max_.DateRun = s.DateRun
+INNER JOIN msdb..sysjobs s1 ON s1.job_id = s.job_id
+WHERE   CONVERT(DATE, s.DateRun) = CONVERT(DATE, GETDATE(), 23)
+AND NOT EXISTS ( SELECT 1
+FROM   Kr1sSqlJobMonitor_TEMP K
+WHERE  s1.name = K.Name
+AND s.DateRun = K.DateRun );
+
+
+INSERT  INTO Kr1sSqlJobMonitor_TEMP
+SELECT  Name ,
+GETDATE() LogDate ,
+DateRun ,
+Message
+FROM    Kr1sSqlJobMonitor_REPORT;
+
+
+
+--DEV
+--WAITFOR DELAY '00:00:05'
+--  SELECT top 0
+--     Name
+--    ,CONVERT(VARCHAR,DateRun,113) DateRun
+--    ,Message
+--  FROM Kr1sSqlJobMonitor_REPORT
+--  UNION ALL
+--  SELECT 'TST00001',   CONVERT(VARCHAR,GETDATE(),113) DateRun
+--    ,'This is a test message of a job failure 01'
+--  UNION all
+--  SELECT 'TST00002',   CONVERT(VARCHAR,GETDATE(),113) DateRun
+--    ,'This is a test message of a job failure 02'
+--GO
+
+
+
+
+
+
+GO
+create PROCEDURE dbo.p_CheckFailedJobsForToday_Monitor_NoResultsTest
+AS
+
+
+
+
+
+
+--WAITFOR DELAY '00:00:05'
+  SELECT top 0
+     Name
+    ,CONVERT(VARCHAR,DateRun,113) DateRun
+    ,Message
+  FROM Kr1sSqlJobMonitor_REPORT
+GO
+
+
+
+
+
+
+CREATE TABLE [dbo].[Kr1sSqlJobMonitor_TEMP]
+(
+    [Name] [sys].[sysname] NOT NULL,
+    [LogDate] [datetime] NULL,
+    [DateRun] [datetime] NULL,
+    [Message] [varchar] (5000)  NULL
+) ON [PRIMARY]
+GO
+
+
+
+CREATE TABLE [dbo].[Kr1sSqlJobMonitor_REPORT]
+(
+    [Name] [sys].[sysname] NOT NULL,
+    [LogDate] [datetime] NULL,
+    [DateRun] [datetime] NULL,
+    [Message] [varchar] (5000) NULL
+) ON [PRIMARY]
+GO
+
+
